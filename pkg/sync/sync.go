@@ -24,6 +24,7 @@ type Options struct {
 	Delete        bool   // Delete extraneous files from destination
 	Threads       int    // Number of concurrent threads
 	Method        string // Comparison method: mtime, checksum, size
+	SkipBrokenLinks bool // Skip broken symbolic links instead of reporting errors
 	// TAR-specific options
 	TarCompress   bool   // Use gzip compression for TAR files
 	GPGEncrypt    bool   // Encrypt TAR files with GPG
@@ -177,11 +178,39 @@ func (s *Syncer) buildFileMap(root, relativeRoot string) (map[string]FileInfo, e
 
 		// Calculate checksum if needed and it's a regular file
 		if s.shouldCalculateChecksum() && !info.IsDir() {
-			checksum, err := s.calculateChecksum(path)
-			if err != nil {
-				s.addError(fmt.Sprintf("Failed to calculate checksum for %s: %v", path, err))
+			// Check if it's a symlink and if it's accessible
+			if info.Mode()&os.ModeSymlink != 0 {
+				// For symlinks, check if target exists
+				if _, err := os.Stat(path); err != nil {
+					// Broken symlink - handle based on options
+					if s.options.SkipBrokenLinks {
+						if s.options.Verbose {
+							fmt.Printf("Skipping broken symlink: %s\n", path)
+						}
+						return nil // Skip this file entirely
+					} else {
+						// Just skip checksum calculation but include the file
+						if s.options.Verbose {
+							s.addError(fmt.Sprintf("Warning: broken symlink %s (target not found)", path))
+						}
+					}
+				} else {
+					// Valid symlink - calculate checksum
+					checksum, err := s.calculateChecksum(path)
+					if err != nil {
+						s.addError(fmt.Sprintf("Failed to calculate checksum for symlink %s: %v", path, err))
+					} else {
+						fileInfo.Checksum = checksum
+					}
+				}
 			} else {
-				fileInfo.Checksum = checksum
+				// Regular file - calculate checksum
+				checksum, err := s.calculateChecksum(path)
+				if err != nil {
+					s.addError(fmt.Sprintf("Failed to calculate checksum for %s: %v", path, err))
+				} else {
+					fileInfo.Checksum = checksum
+				}
 			}
 		}
 

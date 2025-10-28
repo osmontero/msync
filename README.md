@@ -124,6 +124,7 @@ Options:
       --delete            Delete files in destination not present in source
   -j, --threads N         Number of concurrent threads (default: 4)
       --method METHOD     Comparison method: mtime, checksum, size (default: mtime)
+      --skip-broken-links Skip broken symbolic links entirely
 
 TAR Archive Support:
       --tar-compress      Use gzip compression for TAR files
@@ -260,6 +261,41 @@ msync --interactive /source /dest
 # Shows preview, then asks: "Do you want to proceed? [y/N]"
 ```
 
+## Troubleshooting
+
+### Common Issues
+
+#### Broken Symbolic Links
+If you see errors like "Failed to calculate checksum for ... no such file or directory", these are typically broken symbolic links (common in Python virtual environments):
+
+```bash
+# Skip broken symlinks entirely
+msync --skip-broken-links /source /dest
+
+# Or use verbose mode to see warnings but continue processing
+msync --verbose /source /dest
+```
+
+#### Python Virtual Environments
+Python venv/virtualenv directories contain symlinks that may be broken when moved between systems:
+
+```bash
+# Skip broken symlinks when syncing Python projects
+msync --skip-broken-links /python-project /backup/python-project
+```
+
+#### Permission Errors
+Ensure you have read permissions on source files and write permissions on destination:
+
+```bash
+# Check permissions
+ls -la /source
+ls -la /destination
+
+# Run with verbose mode to see detailed error information
+msync --verbose /source /dest
+```
+
 ## Performance
 
 ### Benchmarks
@@ -273,6 +309,7 @@ On a modern system with SSD storage:
 2. **Choose the right method**: Use `mtime` for speed, `checksum` for accuracy
 3. **Batch operations**: Sync larger datasets in single operations
 4. **Monitor throughput**: Use `--verbose` to track performance
+5. **Handle broken symlinks**: Use `--skip-broken-links` to skip broken symbolic links (common in Python venv directories)
 
 ## Development
 

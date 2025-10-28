@@ -30,6 +30,7 @@ type Config struct {
 	Method      string
 	ShowHelp    bool
 	ShowVersion bool
+	SkipBrokenLinks bool
 	// TAR-specific options
 	TarCompress bool
 	GPGEncrypt  bool
@@ -78,19 +79,20 @@ func main() {
 
 	// Create synchronizer
 	syncOptions := sync.Options{
-		Checksum:      config.Checksum,
-		DryRun:        config.DryRun,
-		Interactive:   config.Interactive,
-		Verbose:       config.Verbose,
-		Recursive:     config.Recursive,
-		Delete:        config.Delete,
-		Threads:       config.Threads,
-		Method:        config.Method,
-		TarCompress:   config.TarCompress,
-		GPGEncrypt:    config.GPGEncrypt,
-		GPGSign:       config.GPGSign,
-		GPGKeyID:      config.GPGKeyID,
-		GPGKeyring:    config.GPGKeyring,
+		Checksum:        config.Checksum,
+		DryRun:          config.DryRun,
+		Interactive:     config.Interactive,
+		Verbose:         config.Verbose,
+		Recursive:       config.Recursive,
+		Delete:          config.Delete,
+		Threads:         config.Threads,
+		Method:          config.Method,
+		SkipBrokenLinks: config.SkipBrokenLinks,
+		TarCompress:     config.TarCompress,
+		GPGEncrypt:      config.GPGEncrypt,
+		GPGSign:         config.GPGSign,
+		GPGKeyID:        config.GPGKeyID,
+		GPGKeyring:      config.GPGKeyring,
 	}
 
 	syncer := sync.New(syncOptions)
@@ -155,6 +157,7 @@ func parseFlags() Config {
 	flag.IntVar(&config.Threads, "threads", 4, "Number of concurrent threads")
 	flag.IntVar(&config.Threads, "j", 4, "Number of threads (short)")
 	flag.StringVar(&config.Method, "method", "mtime", "Comparison method: mtime, checksum, size")
+	flag.BoolVar(&config.SkipBrokenLinks, "skip-broken-links", false, "Skip broken symbolic links entirely")
 	// TAR-specific flags
 	flag.BoolVar(&config.TarCompress, "tar-compress", false, "Use gzip compression for TAR files")
 	flag.BoolVar(&config.GPGEncrypt, "gpg-encrypt", false, "Encrypt TAR files with GPG")
@@ -206,6 +209,7 @@ Options:
       --delete            Delete files in destination not present in source
   -j, --threads N         Number of concurrent threads (default: 4)
       --method METHOD     Comparison method: mtime, checksum, size (default: mtime)
+      --skip-broken-links Skip broken symbolic links entirely
   -h, --help              Show this help message
       --version           Show version information
 
