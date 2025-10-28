@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/osmontero/msync/pkg/sync"
+	"github.com/osmontero/msync/pkg/tar"
 )
 
 var (
@@ -29,6 +30,12 @@ type Config struct {
 	Method      string
 	ShowHelp    bool
 	ShowVersion bool
+	// TAR-specific options
+	TarCompress bool
+	GPGEncrypt  bool
+	GPGSign     bool
+	GPGKeyID    string
+	GPGKeyring  string
 }
 
 func main() {
@@ -53,26 +60,37 @@ func main() {
 
 	// Validate paths
 	if _, err := os.Stat(config.Source); os.IsNotExist(err) {
-		log.Fatalf("Source path does not exist: %s", config.Source)
+		// Allow non-existent sources if they are TAR files
+		if !tar.IsTarFile(config.Source) {
+			log.Fatalf("Source path does not exist: %s", config.Source)
+		}
 	}
 
-	// Create destination directory if it doesn't exist
+	// Create destination directory if it doesn't exist and it's not a TAR file
 	if _, err := os.Stat(config.Destination); os.IsNotExist(err) {
-		if err := os.MkdirAll(config.Destination, 0755); err != nil {
-			log.Fatalf("Failed to create destination directory: %v", err)
+		// Don't create directory if destination appears to be a TAR file
+		if !tar.IsTarFile(config.Destination) {
+			if err := os.MkdirAll(config.Destination, 0755); err != nil {
+				log.Fatalf("Failed to create destination directory: %v", err)
+			}
 		}
 	}
 
 	// Create synchronizer
 	syncOptions := sync.Options{
-		Checksum:    config.Checksum,
-		DryRun:      config.DryRun,
-		Interactive: config.Interactive,
-		Verbose:     config.Verbose,
-		Recursive:   config.Recursive,
-		Delete:      config.Delete,
-		Threads:     config.Threads,
-		Method:      config.Method,
+		Checksum:      config.Checksum,
+		DryRun:        config.DryRun,
+		Interactive:   config.Interactive,
+		Verbose:       config.Verbose,
+		Recursive:     config.Recursive,
+		Delete:        config.Delete,
+		Threads:       config.Threads,
+		Method:        config.Method,
+		TarCompress:   config.TarCompress,
+		GPGEncrypt:    config.GPGEncrypt,
+		GPGSign:       config.GPGSign,
+		GPGKeyID:      config.GPGKeyID,
+		GPGKeyring:    config.GPGKeyring,
 	}
 
 	syncer := sync.New(syncOptions)
@@ -137,6 +155,13 @@ func parseFlags() Config {
 	flag.IntVar(&config.Threads, "threads", 4, "Number of concurrent threads")
 	flag.IntVar(&config.Threads, "j", 4, "Number of threads (short)")
 	flag.StringVar(&config.Method, "method", "mtime", "Comparison method: mtime, checksum, size")
+	// TAR-specific flags
+	flag.BoolVar(&config.TarCompress, "tar-compress", false, "Use gzip compression for TAR files")
+	flag.BoolVar(&config.GPGEncrypt, "gpg-encrypt", false, "Encrypt TAR files with GPG")
+	flag.BoolVar(&config.GPGSign, "gpg-sign", false, "Sign TAR files with GPG")
+	flag.StringVar(&config.GPGKeyID, "gpg-key", "", "GPG key ID for encryption/signing")
+	flag.StringVar(&config.GPGKeyring, "gpg-keyring", "", "Path to GPG keyring")
+	// Help and version
 	flag.BoolVar(&config.ShowHelp, "help", false, "Show help")
 	flag.BoolVar(&config.ShowHelp, "h", false, "Show help (short)")
 	flag.BoolVar(&config.ShowVersion, "version", false, "Show version")
@@ -188,6 +213,20 @@ Comparison Methods:
   mtime    - Compare by modification time (fastest)
   checksum - Compare by SHA256 hash (most accurate)
   size     - Compare by file size (fast but less reliable)
+
+TAR Archive Support:
+  --tar-compress      Use gzip compression for TAR files
+  --gpg-encrypt       Encrypt TAR files with GPG
+  --gpg-sign          Sign TAR files with GPG  
+  --gpg-key ID        GPG key ID for encryption/signing
+  --gpg-keyring PATH  Path to GPG keyring
+
+TAR Examples:
+  msync /src backup.tar.gz                    # Create compressed TAR from directory
+  msync archive.tar /dst                      # Extract TAR to directory
+  msync --gpg-encrypt --gpg-key USER /src backup.tar.gpg
+  msync --gpg-sign --gpg-key USER /src backup.tar.gz
+  msync old.tar.gz new.tar.gz                 # TAR to TAR synchronization
 
 `, version)
 }

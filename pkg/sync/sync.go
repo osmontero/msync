@@ -11,18 +11,25 @@ import (
 	"time"
 
 	"github.com/osmontero/msync/internal/utils"
+	"github.com/osmontero/msync/pkg/tar"
 )
 
 // Options holds configuration for the synchronization process
 type Options struct {
-	Checksum    bool   // Use checksum comparison
-	DryRun      bool   // Show what would be copied without copying
-	Interactive bool   // Interactive mode (not used in sync package directly)
-	Verbose     bool   // Enable verbose output
-	Recursive   bool   // Recursively sync directories
-	Delete      bool   // Delete extraneous files from destination
-	Threads     int    // Number of concurrent threads
-	Method      string // Comparison method: mtime, checksum, size
+	Checksum      bool   // Use checksum comparison
+	DryRun        bool   // Show what would be copied without copying
+	Interactive   bool   // Interactive mode (not used in sync package directly)
+	Verbose       bool   // Enable verbose output
+	Recursive     bool   // Recursively sync directories
+	Delete        bool   // Delete extraneous files from destination
+	Threads       int    // Number of concurrent threads
+	Method        string // Comparison method: mtime, checksum, size
+	// TAR-specific options
+	TarCompress   bool   // Use gzip compression for TAR files
+	GPGEncrypt    bool   // Encrypt TAR files with GPG
+	GPGSign       bool   // Sign TAR files with GPG
+	GPGKeyID      string // GPG key ID for encryption/signing
+	GPGKeyring    string // Path to GPG keyring
 }
 
 // Syncer represents a file synchronizer
@@ -83,6 +90,15 @@ func (s *Syncer) Sync(source, destination string) error {
 	}
 
 	startTime := time.Now()
+
+	// Check if source or destination are TAR files
+	sourceTar := tar.IsTarFile(source)
+	destTar := tar.IsTarFile(destination)
+
+	// Handle TAR file scenarios
+	if sourceTar || destTar {
+		return s.syncWithTar(source, destination, sourceTar, destTar)
+	}
 
 	// Build file maps for comparison
 	sourceFiles, err := s.buildFileMap(source, "")
@@ -487,36 +503,36 @@ func (s *Syncer) printStats(elapsed time.Duration) {
 
 // printPreviewSummary prints a comprehensive preview of planned operations
 func (s *Syncer) printPreviewSummary(elapsed time.Duration) {
-	fmt.Printf("\n" + strings.Repeat("=", 60) + "\n")
+	fmt.Printf("\n%s\n", strings.Repeat("=", 60))
 	fmt.Printf("                    SYNC PREVIEW SUMMARY\n")
-	fmt.Printf(strings.Repeat("=", 60) + "\n")
+	fmt.Printf("%s\n", strings.Repeat("=", 60))
 
 	totalOperations := s.stats.FilesToCopy + s.stats.FilesToDelete + s.stats.DirsToCreate
 
 	if totalOperations == 0 {
-		fmt.Printf("✓ No changes needed - source and destination are in sync\n")
+		fmt.Printf("* No changes needed - source and destination are in sync\n")
 		fmt.Printf("  Files checked: %d\n", s.stats.FilesChecked)
 		fmt.Printf("  Analysis time: %s\n", utils.FormatDuration(elapsed.Seconds()))
 		return
 	}
 
-	fmt.Printf("📋 PLANNED OPERATIONS:\n")
-	fmt.Printf(strings.Repeat("-", 30) + "\n")
+	fmt.Printf("PLANNED OPERATIONS:\n")
+	fmt.Printf("%s\n", strings.Repeat("-", 30))
 
 	if s.stats.FilesToCopy > 0 {
-		fmt.Printf("📁 Files to copy:      %d (%s)\n", s.stats.FilesToCopy, utils.FormatBytes(s.stats.BytesToCopy))
+		fmt.Printf("Files to copy:      %d (%s)\n", s.stats.FilesToCopy, utils.FormatBytes(s.stats.BytesToCopy))
 	}
 
 	if s.stats.DirsToCreate > 0 {
-		fmt.Printf("📂 Directories to create: %d\n", s.stats.DirsToCreate)
+		fmt.Printf("Directories to create: %d\n", s.stats.DirsToCreate)
 	}
 
 	if s.stats.FilesToDelete > 0 {
-		fmt.Printf("🗑️  Files to delete:    %d (%s)\n", s.stats.FilesToDelete, utils.FormatBytes(s.stats.BytesToDelete))
+		fmt.Printf("Files to delete:    %d (%s)\n", s.stats.FilesToDelete, utils.FormatBytes(s.stats.BytesToDelete))
 	}
 
-	fmt.Printf(strings.Repeat("-", 30) + "\n")
-	fmt.Printf("📊 SUMMARY:\n")
+	fmt.Printf("%s\n", strings.Repeat("-", 30))
+	fmt.Printf("SUMMARY:\n")
 	fmt.Printf("   Total operations:   %d\n", totalOperations)
 	fmt.Printf("   Files checked:      %d\n", s.stats.FilesChecked)
 	fmt.Printf("   Net data transfer:  %s\n", utils.FormatBytes(s.stats.BytesToCopy-s.stats.BytesToDelete))
@@ -532,24 +548,24 @@ func (s *Syncer) printPreviewSummary(elapsed time.Duration) {
 	}
 
 	if len(s.stats.Errors) > 0 {
-		fmt.Printf("\n⚠️  ISSUES FOUND (%d):\n", len(s.stats.Errors))
+		fmt.Printf("\nISSUES FOUND (%d):\n", len(s.stats.Errors))
 		for _, err := range s.stats.Errors {
 			fmt.Printf("   • %s\n", err)
 		}
 	}
 
-	fmt.Printf(strings.Repeat("=", 60) + "\n")
-	fmt.Printf("💡 To execute these changes, run the same command without --dry-run\n")
-	fmt.Printf(strings.Repeat("=", 60) + "\n")
+	fmt.Printf("%s\n", strings.Repeat("=", 60))
+	fmt.Printf("To execute these changes, run the same command without --dry-run\n")
+	fmt.Printf("%s\n", strings.Repeat("=", 60))
 }
 
 // printExecutionSummary prints statistics for actual sync operations
 func (s *Syncer) printExecutionSummary(elapsed time.Duration) {
-	fmt.Printf("\n" + strings.Repeat("=", 50) + "\n")
+	fmt.Printf("\n%s\n", strings.Repeat("=", 50))
 	fmt.Printf("            SYNCHRONIZATION COMPLETE\n")
-	fmt.Printf(strings.Repeat("=", 50) + "\n")
+	fmt.Printf("%s\n", strings.Repeat("=", 50))
 
-	fmt.Printf("📊 RESULTS:\n")
+	fmt.Printf("RESULTS:\n")
 	fmt.Printf("   Files checked:  %d\n", s.stats.FilesChecked)
 	fmt.Printf("   Files copied:   %d\n", s.stats.FilesCopied)
 	fmt.Printf("   Files deleted:  %d\n", s.stats.FilesDeleted)
@@ -564,13 +580,156 @@ func (s *Syncer) printExecutionSummary(elapsed time.Duration) {
 	}
 
 	if len(s.stats.Errors) > 0 {
-		fmt.Printf("\n⚠️  ERRORS (%d):\n", len(s.stats.Errors))
+		fmt.Printf("\nERRORS (%d):\n", len(s.stats.Errors))
 		for _, err := range s.stats.Errors {
 			fmt.Printf("   • %s\n", err)
 		}
 	} else {
-		fmt.Printf("\n✅ Synchronization completed successfully!\n")
+		fmt.Printf("\nSynchronization completed successfully!\n")
 	}
 
-	fmt.Printf(strings.Repeat("=", 50) + "\n")
+	fmt.Printf("%s\n", strings.Repeat("=", 50))
+}
+
+// syncWithTar handles synchronization involving TAR files
+func (s *Syncer) syncWithTar(source, destination string, sourceTar, destTar bool) error {
+	switch {
+	case sourceTar && !destTar:
+		// Extract TAR to directory
+		return s.extractTarToDirectory(source, destination)
+	case !sourceTar && destTar:
+		// Create TAR from directory
+		return s.createTarFromDirectory(source, destination)
+	case sourceTar && destTar:
+		// TAR to TAR sync (extract source, sync, create destination)
+		return s.syncTarToTar(source, destination)
+	default:
+		return fmt.Errorf("invalid TAR sync scenario")
+	}
+}
+
+// extractTarToDirectory extracts a TAR archive to a directory
+func (s *Syncer) extractTarToDirectory(tarPath, destDir string) error {
+	if s.options.Verbose {
+		fmt.Printf("Extracting TAR archive %s to directory %s\n", tarPath, destDir)
+	}
+
+	if s.options.DryRun {
+		fmt.Printf("Would extract TAR archive: %s -> %s\n", tarPath, destDir)
+		return nil
+	}
+
+	// Parse TAR options from file extension
+	tarOptions := tar.ParseTarOptions(tarPath)
+	tarOptions.Verbose = s.options.Verbose
+	tarOptions.GPGKeyID = s.options.GPGKeyID
+	tarOptions.GPGKeyring = s.options.GPGKeyring
+
+	// Create TAR archive handler
+	archive, err := tar.New(tarPath, tarOptions)
+	if err != nil {
+		return fmt.Errorf("failed to create TAR handler: %w", err)
+	}
+
+	// Create destination directory
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
+
+	// Extract archive
+	return archive.Extract(destDir)
+}
+
+// createTarFromDirectory creates a TAR archive from a directory
+func (s *Syncer) createTarFromDirectory(sourceDir, tarPath string) error {
+	if s.options.Verbose {
+		fmt.Printf("Creating TAR archive %s from directory %s\n", tarPath, sourceDir)
+	}
+
+	if s.options.DryRun {
+		fmt.Printf("Would create TAR archive: %s -> %s\n", sourceDir, tarPath)
+		return nil
+	}
+
+	// Build TAR options
+	tarOptions := tar.TarOptions{
+		Compression: s.options.TarCompress,
+		GPGEncrypt:  s.options.GPGEncrypt,
+		GPGSign:     s.options.GPGSign,
+		GPGKeyID:    s.options.GPGKeyID,
+		GPGKeyring:  s.options.GPGKeyring,
+		Verbose:     s.options.Verbose,
+	}
+
+	// Override with parsed options if needed
+	parsedOptions := tar.ParseTarOptions(tarPath)
+	if parsedOptions.Compression {
+		tarOptions.Compression = true
+	}
+	if parsedOptions.GPGEncrypt {
+		tarOptions.GPGEncrypt = true
+	}
+
+	// Create TAR archive handler
+	archive, err := tar.New(tarPath, tarOptions)
+	if err != nil {
+		return fmt.Errorf("failed to create TAR handler: %w", err)
+	}
+
+	// Create archive
+	return archive.Create(sourceDir)
+}
+
+// syncTarToTar synchronizes between two TAR archives
+func (s *Syncer) syncTarToTar(sourceTar, destTar string) error {
+	if s.options.Verbose {
+		fmt.Printf("Synchronizing TAR archive %s to %s\n", sourceTar, destTar)
+	}
+
+	// Create temporary directories for extraction
+	tempDir, err := os.MkdirTemp("", "msync-tar-")
+	if err != nil {
+		return fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	sourceExtractDir := filepath.Join(tempDir, "source")
+	destExtractDir := filepath.Join(tempDir, "dest")
+
+	// Extract source TAR
+	if err := s.extractTarToDirectory(sourceTar, sourceExtractDir); err != nil {
+		return fmt.Errorf("failed to extract source TAR: %w", err)
+	}
+
+	// Extract destination TAR if it exists
+	if _, err := os.Stat(destTar); err == nil {
+		if err := s.extractTarToDirectory(destTar, destExtractDir); err != nil {
+			return fmt.Errorf("failed to extract destination TAR: %w", err)
+		}
+	} else {
+		// Create empty destination directory
+		if err := os.MkdirAll(destExtractDir, 0755); err != nil {
+			return fmt.Errorf("failed to create destination extract directory: %w", err)
+		}
+	}
+
+	// Perform regular directory sync
+	originalDryRun := s.options.DryRun
+	s.options.DryRun = false // We need actual sync for TAR creation
+	
+	if err := s.Sync(sourceExtractDir, destExtractDir); err != nil {
+		s.options.DryRun = originalDryRun
+		return fmt.Errorf("failed to sync extracted directories: %w", err)
+	}
+	
+	s.options.DryRun = originalDryRun
+
+	// Create new destination TAR if not dry run
+	if !s.options.DryRun {
+		if err := s.createTarFromDirectory(destExtractDir, destTar); err != nil {
+			return fmt.Errorf("failed to create destination TAR: %w", err)
+		}
+	}
+
+	return nil
 }

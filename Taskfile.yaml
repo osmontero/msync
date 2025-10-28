@@ -96,3 +96,126 @@ tasks:
     cmds:
       - task --list
     silent: true
+
+  # TAR and GPG related tasks
+  test-tar:
+    desc: Test TAR functionality
+    cmds:
+      - go test -v ./pkg/tar/...
+
+  gpg-list-keys:
+    desc: List available GPG keys
+    cmds:
+      - gpg --list-keys
+
+  gpg-generate-key:
+    desc: Generate a new GPG key for testing
+    cmds:
+      - |
+        echo "Generating GPG key for msync testing..."
+        gpg --batch --generate-key <<EOF
+        Key-Type: RSA
+        Key-Length: 2048
+        Subkey-Type: RSA
+        Subkey-Length: 2048
+        Name-Real: msync Test User
+        Name-Email: test@msync.local
+        Expire-Date: 1y
+        %no-protection
+        %commit
+        EOF
+
+  demo-tar-basic:
+    desc: Demo basic TAR functionality
+    deps: [build]
+    cmds:
+      - mkdir -p demo/source demo/output
+      - echo "Hello from file1" > demo/source/file1.txt
+      - echo "Hello from file2" > demo/source/file2.txt
+      - mkdir -p demo/source/subdir
+      - echo "Hello from subfile" > demo/source/subdir/file3.txt
+      - echo "Creating TAR archive from demo/source..."
+      - ./{{.BINARY_NAME}} demo/source demo/output/archive.tar
+      - echo "Extracting TAR archive to demo/extracted..."
+      - ./{{.BINARY_NAME}} demo/output/archive.tar demo/extracted
+      - echo "Listing contents:"
+      - find demo/extracted -type f -exec echo {} \; -exec cat {} \;
+
+  demo-tar-compressed:
+    desc: Demo compressed TAR functionality
+    deps: [build]
+    cmds:
+      - mkdir -p demo/source demo/output
+      - echo "Hello from compressed file1" > demo/source/file1.txt
+      - echo "Hello from compressed file2" > demo/source/file2.txt
+      - echo "Creating compressed TAR archive..."
+      - ./{{.BINARY_NAME}} --tar-compress demo/source demo/output/archive.tar.gz
+      - echo "Archive size:"
+      - ls -lh demo/output/archive.tar.gz
+      - echo "Extracting compressed TAR archive..."
+      - ./{{.BINARY_NAME}} demo/output/archive.tar.gz demo/extracted-gz
+      - echo "Extracted contents:"
+      - find demo/extracted-gz -type f -exec echo {} \; -exec cat {} \;
+
+  demo-tar-encrypted:
+    desc: Demo GPG encrypted TAR functionality (requires GPG key)
+    deps: [build]
+    cmds:
+      - mkdir -p demo/source demo/output
+      - echo "Secret file content" > demo/source/secret.txt
+      - echo "Another secret" > demo/source/secret2.txt
+      - echo "Creating encrypted TAR archive..."
+      - echo "Note{{":"}} This requires a GPG key. Use 'task gpg-generate-key' first if needed."
+      - |
+        KEY_ID=$(gpg --list-keys --with-colons | grep "^pub" | head -1 | cut -d: -f5)
+        if [ -n "$KEY_ID" ]; then
+          echo "Using GPG key: $KEY_ID"
+          ./{{.BINARY_NAME}} --gpg-encrypt --gpg-key "$KEY_ID" demo/source demo/output/encrypted.tar.gpg
+          echo "Encrypted archive created. Size:"
+          ls -lh demo/output/encrypted.tar.gpg
+          echo "Extracting encrypted archive..."
+          ./{{.BINARY_NAME}} --gpg-key "$KEY_ID" demo/output/encrypted.tar.gpg demo/extracted-encrypted
+          echo "Decrypted contents:"
+          find demo/extracted-encrypted -type f -exec echo {} \; -exec cat {} \;
+        else
+          echo "No GPG keys found. Please run 'task gpg-generate-key' first."
+        fi
+
+  demo-tar-signed:
+    desc: Demo GPG signed TAR functionality (requires GPG key)
+    deps: [build]
+    cmds:
+      - mkdir -p demo/source demo/output
+      - echo "Signed file content" > demo/source/signed.txt
+      - echo "Another signed file" > demo/source/signed2.txt
+      - echo "Creating signed TAR archive..."
+      - |
+        KEY_ID=$(gpg --list-keys --with-colons | grep "^pub" | head -1 | cut -d: -f5)
+        if [ -n "$KEY_ID" ]; then
+          echo "Using GPG key: $KEY_ID"
+          ./{{.BINARY_NAME}} --gpg-sign --gpg-key "$KEY_ID" demo/source demo/output/signed.tar.gz
+          echo "Signed archive created. Files:"
+          ls -lh demo/output/signed.tar.gz*
+          echo "Extracting and verifying signed archive..."
+          ./{{.BINARY_NAME}} --gpg-key "$KEY_ID" demo/output/signed.tar.gz demo/extracted-signed
+          echo "Verified contents:"
+          find demo/extracted-signed -type f -exec echo {} \; -exec cat {} \;
+        else
+          echo "No GPG keys found. Please run 'task gpg-generate-key' first."
+        fi
+
+  demo-clean:
+    desc: Clean demo files
+    cmds:
+      - rm -rf demo/
+
+  demo-all:
+    desc: Run all TAR demos
+    cmds:
+      - task: demo-clean
+      - task: demo-tar-basic
+      - echo "=== Basic TAR demo completed ==="
+      - task: demo-tar-compressed  
+      - echo "=== Compressed TAR demo completed ==="
+      - echo "=== GPG demos require GPG keys ==="
+      - echo "Run 'task gpg-generate-key' first, then 'task demo-tar-encrypted' and 'task demo-tar-signed'"
