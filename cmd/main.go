@@ -85,7 +85,7 @@ func main() {
 
 func parseFlags() Config {
 	config := Config{
-		Threads: 4, // Default number of threads
+		Threads: 4,       // Default number of threads
 		Method:  "mtime", // Default comparison method
 	}
 

@@ -58,7 +58,7 @@ func New(options Options) *Syncer {
 	if options.Threads <= 0 {
 		options.Threads = 4
 	}
-	
+
 	return &Syncer{
 		options: options,
 		stats:   Stats{},
@@ -69,7 +69,7 @@ func New(options Options) *Syncer {
 func (s *Syncer) Sync(source, destination string) error {
 	if s.options.Verbose {
 		fmt.Printf("Starting sync from %s to %s\n", source, destination)
-		fmt.Printf("Method: %s, Threads: %d, DryRun: %t\n", 
+		fmt.Printf("Method: %s, Threads: %d, DryRun: %t\n",
 			s.options.Method, s.options.Threads, s.options.DryRun)
 	}
 
@@ -138,8 +138,8 @@ func (s *Syncer) buildFileMap(root, relativeRoot string) (map[string]FileInfo, e
 			return nil
 		}
 
-		// Skip if not recursive and it's a subdirectory
-		if !s.options.Recursive && info.IsDir() && relPath != "." {
+		// Skip subdirectories if not recursive
+		if !s.options.Recursive && info.IsDir() && filepath.Dir(relPath) != "." {
 			return filepath.SkipDir
 		}
 
@@ -162,7 +162,7 @@ func (s *Syncer) buildFileMap(root, relativeRoot string) (map[string]FileInfo, e
 
 		files[relPath] = fileInfo
 		s.incrementChecked()
-		
+
 		return nil
 	})
 
@@ -174,7 +174,7 @@ func (s *Syncer) processFiles(source, dest string, sourceFiles, destFiles map[st
 	// Create work queue
 	workChan := make(chan FileInfo, len(sourceFiles))
 	errorChan := make(chan error, len(sourceFiles))
-	
+
 	// Start workers
 	var wg sync.WaitGroup
 	for i := 0; i < s.options.Threads; i++ {
@@ -225,7 +225,7 @@ func (s *Syncer) worker(source, dest string, workChan <-chan FileInfo, errorChan
 // shouldSync determines if a file needs to be synchronized
 func (s *Syncer) shouldSync(sourceFile FileInfo, destFiles map[string]FileInfo) bool {
 	destFile, exists := destFiles[sourceFile.Path]
-	
+
 	if !exists {
 		return true // File doesn't exist in destination
 	}
@@ -301,6 +301,12 @@ func (s *Syncer) syncRegularFile(sourcePath, destPath string, fileInfo FileInfo)
 		return nil
 	}
 
+	// Get source file info for preserving timestamps
+	sourceInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to get source file info: %w", err)
+	}
+
 	// Ensure destination directory exists
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
@@ -311,9 +317,9 @@ func (s *Syncer) syncRegularFile(sourcePath, destPath string, fileInfo FileInfo)
 		return fmt.Errorf("failed to copy file %s: %w", sourcePath, err)
 	}
 
-	// Preserve modification time
-	if err := os.Chtimes(destPath, time.Now(), fileInfo.ModTime); err != nil {
-		s.addError(fmt.Sprintf("Failed to preserve modification time for %s: %v", destPath, err))
+	// Preserve both access and modification times from source
+	if err := os.Chtimes(destPath, sourceInfo.ModTime(), sourceInfo.ModTime()); err != nil {
+		s.addError(fmt.Sprintf("Failed to preserve timestamps for %s: %v", destPath, err))
 	}
 
 	s.incrementCopied(fileInfo.Size)
@@ -343,7 +349,7 @@ func (s *Syncer) deleteExtraFiles(dest string, sourceFiles, destFiles map[string
 	for relPath := range destFiles {
 		if _, exists := sourceFiles[relPath]; !exists {
 			fullPath := filepath.Join(dest, relPath)
-			
+
 			if s.options.Verbose {
 				if s.options.DryRun {
 					fmt.Printf("Would delete: %s\n", fullPath)

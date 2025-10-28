@@ -140,8 +140,8 @@ msync --threads 8 --method size /local/data /network/storage/data
 
 ### Development Workflows
 ```bash
-# Sync code to remote server (excluding build artifacts)
-msync --verbose ~/project/ user@server:~/project/
+# Sync build output to deployment directory
+msync --verbose ./build/ /var/www/html/
 
 # Preview deployment changes
 msync --dry-run --delete ./build/ /var/www/html/
