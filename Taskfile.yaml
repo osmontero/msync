@@ -1,0 +1,98 @@
+version: '3'
+
+vars:
+  BINARY_NAME: msync
+  VERSION:
+    sh: git describe --tags --abbrev=0 2>/dev/null || echo "1.0.0"
+  BUILD_TIME:
+    sh: date -u '+%Y-%m-%d_%H:%M:%S'
+  LDFLAGS: -ldflags "-X main.version={{.VERSION}} -X main.buildTime={{.BUILD_TIME}}"
+
+tasks:
+  default:
+    cmds:
+      - task: build
+    desc: Default task - build the binary
+
+  build:
+    desc: Build the binary
+    cmds:
+      - go build {{.LDFLAGS}} -o {{.BINARY_NAME}} ./cmd
+    generates:
+      - "{{.BINARY_NAME}}"
+
+  build-all:
+    desc: Build for multiple platforms
+    cmds:
+      - GOOS=linux GOARCH=amd64 go build {{.LDFLAGS}} -o {{.BINARY_NAME}}-linux-amd64 ./cmd
+      - GOOS=darwin GOARCH=amd64 go build {{.LDFLAGS}} -o {{.BINARY_NAME}}-darwin-amd64 ./cmd
+      - GOOS=darwin GOARCH=arm64 go build {{.LDFLAGS}} -o {{.BINARY_NAME}}-darwin-arm64 ./cmd
+      - GOOS=windows GOARCH=amd64 go build {{.LDFLAGS}} -o {{.BINARY_NAME}}-windows-amd64.exe ./cmd
+    generates:
+      - "{{.BINARY_NAME}}-linux-amd64"
+      - "{{.BINARY_NAME}}-darwin-amd64"
+      - "{{.BINARY_NAME}}-darwin-arm64"
+      - "{{.BINARY_NAME}}-windows-amd64.exe"
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test -v ./...
+
+  test-coverage:
+    desc: Run tests with coverage report
+    cmds:
+      - go test -v -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+    generates:
+      - coverage.out
+      - coverage.html
+
+  bench:
+    desc: Run benchmarks
+    cmds:
+      - go test -bench=. ./...
+
+  fmt:
+    desc: Format code
+    cmds:
+      - go fmt ./...
+
+  lint:
+    desc: Run linter
+    cmds:
+      - golangci-lint run ./...
+
+  deps:
+    desc: Install dependencies
+    cmds:
+      - go mod download
+      - go mod tidy
+
+  install:
+    desc: Install binary to /usr/local/bin
+    deps: [build]
+    cmds:
+      - install -m 755 {{.BINARY_NAME}} /usr/local/bin/
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -f {{.BINARY_NAME}} {{.BINARY_NAME}}-* coverage.out coverage.html
+
+  dev-setup:
+    desc: Set up development tools
+    cmds:
+      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+  integration-test:
+    desc: Run integration tests
+    deps: [build]
+    cmds:
+      - ./scripts/integration_test.sh
+
+  help:
+    desc: Show available tasks
+    cmds:
+      - task --list
+    silent: true
