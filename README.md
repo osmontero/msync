@@ -71,9 +71,15 @@ msync --threads 16 /source /dest
 msync --delete /source /dest
 ```
 
-#### Dry Run Preview
+#### Preview Mode (Plane Mode)
 ```bash
-# Preview what would be synchronized
+# Preview what would be synchronized (comprehensive summary)
+msync --plan --verbose /source /dest
+
+# Interactive mode with preview and confirmation
+msync --interactive /source /dest
+
+# Traditional dry run (still supported)
 msync --dry-run --verbose /source /dest
 ```
 
@@ -95,6 +101,8 @@ Options:
   -d, --dest PATH         Destination directory or file
   -c, --checksum          Use checksum comparison (slower but more accurate)
   -n, --dry-run           Show what would be synced without making changes
+      --plan              Preview changes without executing (enhanced dry-run)
+  -i, --interactive       Show preview and ask for confirmation before proceeding
   -v, --verbose           Enable verbose output
   -r, --recursive         Sync directories recursively (default: true)
       --delete            Delete files in destination not present in source
@@ -143,8 +151,52 @@ msync --threads 8 --method size /local/data /network/storage/data
 # Sync build output to deployment directory
 msync --verbose ./build/ /var/www/html/
 
-# Preview deployment changes
-msync --dry-run --delete ./build/ /var/www/html/
+# Preview deployment changes with enhanced summary
+msync --plan --delete ./build/ /var/www/html/
+
+# Interactive deployment with confirmation
+msync --interactive --delete ./build/ /var/www/html/
+```
+
+## Enhanced Preview Features
+
+### Comprehensive Preview Summary
+The `--plan` flag provides an enhanced dry-run experience with:
+- **Visual Summary**: Clear breakdown of planned operations
+- **Data Transfer Estimates**: Shows net data transfer and estimated time
+- **Operation Categorization**: Separate counts for files to copy, delete, and directories to create
+- **Smart Analysis**: Detects when no changes are needed
+
+```bash
+# Example output:
+============================================================
+                    SYNC PREVIEW SUMMARY
+============================================================
+📋 PLANNED OPERATIONS:
+------------------------------
+📁 Files to copy:      15 (2.3 MB)
+📂 Directories to create: 3
+🗑️  Files to delete:    2 (150 KB)
+------------------------------
+📊 SUMMARY:
+   Total operations:   20
+   Files checked:      156
+   Net data transfer:  2.2 MB
+   Analysis time:      0.2s
+   Estimated sync time: 1.5s
+============================================================
+```
+
+### Interactive Mode
+The `--interactive` flag combines preview with user confirmation:
+1. Performs comprehensive analysis
+2. Shows detailed preview summary
+3. Prompts for user confirmation
+4. Executes only if approved
+
+```bash
+msync --interactive /source /dest
+# Shows preview, then asks: "Do you want to proceed? [y/N]"
 ```
 
 ## Performance

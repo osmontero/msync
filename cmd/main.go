@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/osmontero/msync/pkg/sync"
 )
@@ -19,6 +21,7 @@ type Config struct {
 	Destination string
 	Checksum    bool
 	DryRun      bool
+	Interactive bool
 	Verbose     bool
 	Recursive   bool
 	Delete      bool
@@ -62,16 +65,42 @@ func main() {
 
 	// Create synchronizer
 	syncOptions := sync.Options{
-		Checksum:  config.Checksum,
-		DryRun:    config.DryRun,
-		Verbose:   config.Verbose,
-		Recursive: config.Recursive,
-		Delete:    config.Delete,
-		Threads:   config.Threads,
-		Method:    config.Method,
+		Checksum:    config.Checksum,
+		DryRun:      config.DryRun,
+		Interactive: config.Interactive,
+		Verbose:     config.Verbose,
+		Recursive:   config.Recursive,
+		Delete:      config.Delete,
+		Threads:     config.Threads,
+		Method:      config.Method,
 	}
 
 	syncer := sync.New(syncOptions)
+
+	// Handle interactive mode
+	if config.Interactive {
+		// First run a dry run to show preview
+		previewOptions := syncOptions
+		previewOptions.DryRun = true
+		previewOptions.Verbose = true
+		previewSyncer := sync.New(previewOptions)
+		
+		fmt.Println("🔍 Analyzing changes...")
+		if err := previewSyncer.Sync(config.Source, config.Destination); err != nil {
+			log.Fatalf("Preview analysis failed: %v", err)
+		}
+
+		// Ask for confirmation
+		if !askForConfirmation() {
+			fmt.Println("Operation cancelled by user.")
+			return
+		}
+
+		// Proceed with actual sync
+		actualOptions := syncOptions
+		actualOptions.DryRun = false
+		syncer = sync.New(actualOptions)
+	}
 
 	// Perform synchronization
 	if err := syncer.Sync(config.Source, config.Destination); err != nil {
@@ -96,7 +125,10 @@ func parseFlags() Config {
 	flag.BoolVar(&config.Checksum, "checksum", false, "Use checksum comparison instead of modification time")
 	flag.BoolVar(&config.Checksum, "c", false, "Use checksum comparison (short)")
 	flag.BoolVar(&config.DryRun, "dry-run", false, "Show what would be copied without actually copying")
+	flag.BoolVar(&config.DryRun, "plan", false, "Preview changes without executing (alias for --dry-run)")
 	flag.BoolVar(&config.DryRun, "n", false, "Dry run (short)")
+	flag.BoolVar(&config.Interactive, "interactive", false, "Show preview and ask for confirmation before proceeding")
+	flag.BoolVar(&config.Interactive, "i", false, "Interactive mode (short)")
 	flag.BoolVar(&config.Verbose, "verbose", false, "Verbose output")
 	flag.BoolVar(&config.Verbose, "v", false, "Verbose output (short)")
 	flag.BoolVar(&config.Recursive, "recursive", true, "Recursively sync directories")
@@ -133,7 +165,8 @@ Usage:
 Examples:
   msync /home/user/docs /backup/docs
   msync -c -v /src /dst                    # Use checksum with verbose output
-  msync --dry-run --delete /src /dst       # Preview sync with deletion
+  msync --plan --delete /src /dst          # Preview sync with deletion
+  msync -i /src /dst                       # Interactive mode with preview
   msync -j 8 --method checksum /src /dst   # Use 8 threads with checksum
 
 Options:
@@ -141,6 +174,8 @@ Options:
   -d, --dest PATH         Destination directory or file
   -c, --checksum          Use checksum comparison (slower but more accurate)
   -n, --dry-run           Show what would be synced without making changes
+      --plan              Preview changes without executing (same as --dry-run)
+  -i, --interactive       Show preview and ask for confirmation before proceeding
   -v, --verbose           Enable verbose output
   -r, --recursive         Sync directories recursively (default: true)
       --delete            Delete files in destination not present in source
@@ -155,4 +190,18 @@ Comparison Methods:
   size     - Compare by file size (fast but less reliable)
 
 `, version)
+}
+
+// askForConfirmation prompts the user for confirmation
+func askForConfirmation() bool {
+	fmt.Print("\n❓ Do you want to proceed with these changes? [y/N]: ")
+	
+	reader := bufio.NewReader(os.Stdin)
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return false
+	}
+
+	response = strings.TrimSpace(strings.ToLower(response))
+	return response == "y" || response == "yes"
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,13 +15,14 @@ import (
 
 // Options holds configuration for the synchronization process
 type Options struct {
-	Checksum  bool   // Use checksum comparison
-	DryRun    bool   // Show what would be copied without copying
-	Verbose   bool   // Enable verbose output
-	Recursive bool   // Recursively sync directories
-	Delete    bool   // Delete extraneous files from destination
-	Threads   int    // Number of concurrent threads
-	Method    string // Comparison method: mtime, checksum, size
+	Checksum    bool   // Use checksum comparison
+	DryRun      bool   // Show what would be copied without copying
+	Interactive bool   // Interactive mode (not used in sync package directly)
+	Verbose     bool   // Enable verbose output
+	Recursive   bool   // Recursively sync directories
+	Delete      bool   // Delete extraneous files from destination
+	Threads     int    // Number of concurrent threads
+	Method      string // Comparison method: mtime, checksum, size
 }
 
 // Syncer represents a file synchronizer
@@ -37,7 +39,14 @@ type Stats struct {
 	FilesDeleted int64
 	BytesCopied  int64
 	BytesDeleted int64
+	DirsCreated  int64
 	Errors       []string
+	// Preview-specific stats
+	FilesToCopy   int64
+	FilesToDelete int64
+	BytesToCopy   int64
+	BytesToDelete int64
+	DirsToCreate  int64
 }
 
 // FileInfo represents file information for comparison
@@ -278,10 +287,13 @@ func (s *Syncer) syncDirectory(destPath string, fileInfo FileInfo) error {
 		}
 	}
 
-	if !s.options.DryRun {
+	if s.options.DryRun {
+		s.incrementDirToCreate()
+	} else {
 		if err := os.MkdirAll(destPath, 0755); err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", destPath, err)
 		}
+		s.incrementDirCreated()
 	}
 
 	return nil
@@ -298,6 +310,7 @@ func (s *Syncer) syncRegularFile(sourcePath, destPath string, fileInfo FileInfo)
 	}
 
 	if s.options.DryRun {
+		s.incrementFileToCopy(fileInfo.Size)
 		return nil
 	}
 
@@ -350,20 +363,28 @@ func (s *Syncer) deleteExtraFiles(dest string, sourceFiles, destFiles map[string
 		if _, exists := sourceFiles[relPath]; !exists {
 			fullPath := filepath.Join(dest, relPath)
 
+			info, err := os.Stat(fullPath)
+			if err != nil {
+				continue
+			}
+
 			if s.options.Verbose {
+				sizeStr := ""
+				if !info.IsDir() {
+					sizeStr = fmt.Sprintf(" (%s)", utils.FormatBytes(info.Size()))
+				}
 				if s.options.DryRun {
-					fmt.Printf("Would delete: %s\n", fullPath)
+					fmt.Printf("Would delete: %s%s\n", fullPath, sizeStr)
 				} else {
-					fmt.Printf("Deleting: %s\n", fullPath)
+					fmt.Printf("Deleting: %s%s\n", fullPath, sizeStr)
 				}
 			}
 
-			if !s.options.DryRun {
-				info, err := os.Stat(fullPath)
-				if err != nil {
-					continue
+			if s.options.DryRun {
+				if !info.IsDir() {
+					s.incrementFileToDelete(info.Size())
 				}
-
+			} else {
 				if err := os.RemoveAll(fullPath); err != nil {
 					s.addError(fmt.Sprintf("Failed to delete %s: %v", fullPath, err))
 					continue
@@ -426,28 +447,130 @@ func (s *Syncer) addError(err string) {
 	s.mu.Unlock()
 }
 
+func (s *Syncer) incrementDirCreated() {
+	s.mu.Lock()
+	s.stats.DirsCreated++
+	s.mu.Unlock()
+}
+
+func (s *Syncer) incrementDirToCreate() {
+	s.mu.Lock()
+	s.stats.DirsToCreate++
+	s.mu.Unlock()
+}
+
+func (s *Syncer) incrementFileToCopy(bytes int64) {
+	s.mu.Lock()
+	s.stats.FilesToCopy++
+	s.stats.BytesToCopy += bytes
+	s.mu.Unlock()
+}
+
+func (s *Syncer) incrementFileToDelete(bytes int64) {
+	s.mu.Lock()
+	s.stats.FilesToDelete++
+	s.stats.BytesToDelete += bytes
+	s.mu.Unlock()
+}
+
 // printStats prints synchronization statistics
 func (s *Syncer) printStats(elapsed time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	fmt.Printf("\nSynchronization Statistics:\n")
-	fmt.Printf("Files checked: %d\n", s.stats.FilesChecked)
-	fmt.Printf("Files copied: %d\n", s.stats.FilesCopied)
-	fmt.Printf("Files deleted: %d\n", s.stats.FilesDeleted)
-	fmt.Printf("Bytes copied: %s\n", utils.FormatBytes(s.stats.BytesCopied))
-	fmt.Printf("Bytes deleted: %s\n", utils.FormatBytes(s.stats.BytesDeleted))
-	fmt.Printf("Time elapsed: %s\n", utils.FormatDuration(elapsed.Seconds()))
+	if s.options.DryRun {
+		s.printPreviewSummary(elapsed)
+	} else {
+		s.printExecutionSummary(elapsed)
+	}
+}
 
-	if s.stats.BytesCopied > 0 && elapsed.Seconds() > 0 {
-		throughput := float64(s.stats.BytesCopied) / elapsed.Seconds()
-		fmt.Printf("Throughput: %s/s\n", utils.FormatBytes(int64(throughput)))
+// printPreviewSummary prints a comprehensive preview of planned operations
+func (s *Syncer) printPreviewSummary(elapsed time.Duration) {
+	fmt.Printf("\n" + strings.Repeat("=", 60) + "\n")
+	fmt.Printf("                    SYNC PREVIEW SUMMARY\n")
+	fmt.Printf(strings.Repeat("=", 60) + "\n")
+
+	totalOperations := s.stats.FilesToCopy + s.stats.FilesToDelete + s.stats.DirsToCreate
+
+	if totalOperations == 0 {
+		fmt.Printf("✓ No changes needed - source and destination are in sync\n")
+		fmt.Printf("  Files checked: %d\n", s.stats.FilesChecked)
+		fmt.Printf("  Analysis time: %s\n", utils.FormatDuration(elapsed.Seconds()))
+		return
+	}
+
+	fmt.Printf("📋 PLANNED OPERATIONS:\n")
+	fmt.Printf(strings.Repeat("-", 30) + "\n")
+
+	if s.stats.FilesToCopy > 0 {
+		fmt.Printf("📁 Files to copy:      %d (%s)\n", s.stats.FilesToCopy, utils.FormatBytes(s.stats.BytesToCopy))
+	}
+
+	if s.stats.DirsToCreate > 0 {
+		fmt.Printf("📂 Directories to create: %d\n", s.stats.DirsToCreate)
+	}
+
+	if s.stats.FilesToDelete > 0 {
+		fmt.Printf("🗑️  Files to delete:    %d (%s)\n", s.stats.FilesToDelete, utils.FormatBytes(s.stats.BytesToDelete))
+	}
+
+	fmt.Printf(strings.Repeat("-", 30) + "\n")
+	fmt.Printf("📊 SUMMARY:\n")
+	fmt.Printf("   Total operations:   %d\n", totalOperations)
+	fmt.Printf("   Files checked:      %d\n", s.stats.FilesChecked)
+	fmt.Printf("   Net data transfer:  %s\n", utils.FormatBytes(s.stats.BytesToCopy-s.stats.BytesToDelete))
+	fmt.Printf("   Analysis time:      %s\n", utils.FormatDuration(elapsed.Seconds()))
+
+	if s.stats.BytesToCopy > 0 {
+		// Rough estimation: 50MB/s for typical operations
+		estimatedSeconds := float64(s.stats.BytesToCopy) / (50 * 1024 * 1024)
+		if estimatedSeconds < 1 {
+			estimatedSeconds = 1
+		}
+		fmt.Printf("   Estimated sync time: %s\n", utils.FormatDuration(estimatedSeconds))
 	}
 
 	if len(s.stats.Errors) > 0 {
-		fmt.Printf("Errors (%d):\n", len(s.stats.Errors))
+		fmt.Printf("\n⚠️  ISSUES FOUND (%d):\n", len(s.stats.Errors))
 		for _, err := range s.stats.Errors {
-			fmt.Printf("  - %s\n", err)
+			fmt.Printf("   • %s\n", err)
 		}
 	}
+
+	fmt.Printf(strings.Repeat("=", 60) + "\n")
+	fmt.Printf("💡 To execute these changes, run the same command without --dry-run\n")
+	fmt.Printf(strings.Repeat("=", 60) + "\n")
+}
+
+// printExecutionSummary prints statistics for actual sync operations
+func (s *Syncer) printExecutionSummary(elapsed time.Duration) {
+	fmt.Printf("\n" + strings.Repeat("=", 50) + "\n")
+	fmt.Printf("            SYNCHRONIZATION COMPLETE\n")
+	fmt.Printf(strings.Repeat("=", 50) + "\n")
+
+	fmt.Printf("📊 RESULTS:\n")
+	fmt.Printf("   Files checked:  %d\n", s.stats.FilesChecked)
+	fmt.Printf("   Files copied:   %d\n", s.stats.FilesCopied)
+	fmt.Printf("   Files deleted:  %d\n", s.stats.FilesDeleted)
+	fmt.Printf("   Dirs created:   %d\n", s.stats.DirsCreated)
+	fmt.Printf("   Bytes copied:   %s\n", utils.FormatBytes(s.stats.BytesCopied))
+	fmt.Printf("   Bytes deleted:  %s\n", utils.FormatBytes(s.stats.BytesDeleted))
+	fmt.Printf("   Time elapsed:   %s\n", utils.FormatDuration(elapsed.Seconds()))
+
+	if s.stats.BytesCopied > 0 && elapsed.Seconds() > 0 {
+		throughput := float64(s.stats.BytesCopied) / elapsed.Seconds()
+		fmt.Printf("   Throughput:     %s/s\n", utils.FormatBytes(int64(throughput)))
+	}
+
+	if len(s.stats.Errors) > 0 {
+		fmt.Printf("\n⚠️  ERRORS (%d):\n", len(s.stats.Errors))
+		for _, err := range s.stats.Errors {
+			fmt.Printf("   • %s\n", err)
+		}
+	} else {
+		fmt.Printf("\n✅ Synchronization completed successfully!\n")
+	}
+
+	fmt.Printf(strings.Repeat("=", 50) + "\n")
 }
