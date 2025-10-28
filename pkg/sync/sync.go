@@ -386,20 +386,40 @@ func (s *Syncer) syncRegularFile(sourcePath, destPath string, fileInfo FileInfo)
 
 // copyFile performs the actual file copy
 func (s *Syncer) copyFile(src, dst string) error {
+	if s.options.Verbose {
+		fmt.Printf("  Opening source file: %s\n", src)
+	}
+	
 	source, err := os.Open(src)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open source file %s: %w", src, err)
 	}
 	defer source.Close()
 
+	if s.options.Verbose {
+		fmt.Printf("  Creating/overwriting destination file: %s\n", dst)
+	}
+	
 	destination, err := os.Create(dst)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create destination file %s: %w", dst, err)
 	}
 	defer destination.Close()
 
-	_, err = io.Copy(destination, source)
-	return err
+	if s.options.Verbose {
+		fmt.Printf("  Copying data from source to destination...\n")
+	}
+	
+	bytesWritten, err := io.Copy(destination, source)
+	if err != nil {
+		return fmt.Errorf("failed to copy data: %w", err)
+	}
+	
+	if s.options.Verbose {
+		fmt.Printf("  Successfully copied %d bytes\n", bytesWritten)
+	}
+	
+	return nil
 }
 
 // deleteExtraFiles removes files from destination that don't exist in source
