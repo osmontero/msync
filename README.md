@@ -13,6 +13,8 @@ A high-performance, cross-platform file synchronization tool similar to rsync, b
 - **Cross-Platform**: Runs on Linux, macOS, Windows, and other Unix-like systems
 - **Preserve Attributes**: Maintains file modification times and permissions
 - **Directory Synchronization**: Full recursive directory tree synchronization
+- **TAR Archive Support**: Create, extract, and synchronize TAR archives with optional compression
+- **GPG Integration**: Encrypt and sign TAR archives with GPG for secure backups
 - **Dry Run Mode**: Preview operations before execution
 - **Delete Support**: Remove extraneous files from destination
 - **Progress Reporting**: Detailed statistics and throughput information
@@ -26,17 +28,31 @@ A high-performance, cross-platform file synchronization tool similar to rsync, b
 
 ## Installation
 
+### Prerequisites
+- **Go 1.19+** for building from source
+- **Task** (optional, for development): Install with `brew install go-task/tap/go-task` or `nix-env -iA nixpkgs.go-task`
+- **GPG** (optional, for encrypted archives): Usually pre-installed on Unix systems
+
 ### From Source
 ```bash
 git clone https://github.com/osmontero/msync.git
 cd msync
-make build
-sudo make install
+task build
+task install
 ```
 
 ### Using Go
 ```bash
+# Install with proper binary name
 go install github.com/osmontero/msync/cmd@latest
+# The binary will be installed as 'cmd', rename it:
+mv $GOPATH/bin/cmd $GOPATH/bin/msync
+# Or if using Go modules (Go 1.16+):
+mv $(go env GOPATH)/bin/cmd $(go env GOPATH)/bin/msync
+
+# Alternative: Build locally and install
+git clone https://github.com/osmontero/msync.git
+cd msync && task build && task install
 ```
 
 ## Usage
@@ -108,6 +124,15 @@ Options:
       --delete            Delete files in destination not present in source
   -j, --threads N         Number of concurrent threads (default: 4)
       --method METHOD     Comparison method: mtime, checksum, size (default: mtime)
+
+TAR Archive Support:
+      --tar-compress      Use gzip compression for TAR files
+      --gpg-encrypt       Encrypt TAR files with GPG
+      --gpg-sign          Sign TAR files with GPG  
+      --gpg-key ID        GPG key ID for encryption/signing
+      --gpg-keyring PATH  Path to GPG keyring
+
+General:
   -h, --help              Show help message
       --version           Show version information
 ```
@@ -119,6 +144,18 @@ Options:
 | `mtime` | Modification time + size | Fast | Good | General sync, frequent updates |
 | `checksum` | SHA256 hash | Slow | Excellent | Critical data, verification |
 | `size` | File size only | Very Fast | Basic | Large files, quick checks |
+
+### TAR Archive Workflows
+
+`msync` automatically detects TAR files and handles three types of operations:
+
+| Source | Destination | Operation | Description |
+|--------|-------------|-----------|-------------|
+| Directory | `*.tar*` | **Create** | Create TAR archive from directory |
+| `*.tar*` | Directory | **Extract** | Extract TAR archive to directory |
+| `*.tar*` | `*.tar*` | **Sync** | Extract source, sync, create destination |
+
+**Supported Extensions**: `.tar`, `.tar.gz`, `.tgz`, `.tar.gpg`, `.tar.gz.gpg`, `.tgz.gpg`
 
 ## Examples
 
@@ -156,6 +193,30 @@ msync --plan --delete ./build/ /var/www/html/
 
 # Interactive deployment with confirmation
 msync --interactive --delete ./build/ /var/www/html/
+```
+
+### TAR Archive Operations
+```bash
+# Create TAR archive from directory
+msync /src backup.tar
+
+# Create compressed TAR archive
+msync --tar-compress /src backup.tar.gz
+
+# Extract TAR archive to directory
+msync archive.tar /dst
+
+# Create encrypted TAR archive
+msync --gpg-encrypt --gpg-key USER_ID /src backup.tar.gpg
+
+# Create signed and compressed TAR archive
+msync --gpg-sign --tar-compress --gpg-key USER_ID /src backup.tar.gz
+
+# TAR to TAR synchronization
+msync old.tar.gz new.tar.gz
+
+# Secure backup workflow
+msync --gpg-encrypt --gpg-sign --tar-compress --gpg-key USER_ID /important/data secure_backup.tar.gz.gpg
 ```
 
 ## Enhanced Preview Features
@@ -222,40 +283,61 @@ git clone https://github.com/osmontero/msync.git
 cd msync
 
 # Install dependencies
-make deps
+task deps
 
 # Build binary
-make build
+task build
 
 # Run tests
-make test
+task test
 
 # Run benchmarks
-make bench
+task bench
 
 # Build for multiple platforms
-make build-all
+task build-all
+
+# TAR-specific tests
+task test-tar
+
+# Run TAR demos
+task demo-tar-basic
+task demo-tar-compressed
 ```
 
 ### Testing
 ```bash
-# Run unit tests
+# Run all tests
+task test
+
+# Run unit tests for specific packages
 go test ./pkg/sync
+go test ./pkg/tar
 
 # Run benchmarks
-go test -bench=. ./pkg/sync
+task bench
 
 # Test coverage
-make test-coverage
+task test-coverage
+
+# TAR-specific testing
+task test-tar
+
+# GPG functionality demos (requires GPG setup)
+task gpg-generate-key
+task demo-tar-encrypted
+task demo-tar-signed
 ```
 
 ### Project Structure
 ```
 msync/
 ├── cmd/                    # Main application
-├── pkg/sync/              # Core synchronization library
+├── pkg/
+│   ├── sync/              # Core synchronization library
+│   └── tar/               # TAR archive handling with GPG support
 ├── internal/utils/        # Utility functions
-├── Makefile              # Build automation
+├── Taskfile.yaml         # Task automation (replaces Makefile)
 └── README.md             # This file
 ```
 
@@ -290,11 +372,27 @@ This project is licensed under the GNU General Public License v3.0 - see the [LI
 | **Compression** | No | Yes |
 | **Incremental** | Yes | Yes |
 
+## Recent Updates
+
+### ✅ TAR Archive Support (v1.1.0)
+- **TAR Operations**: Create, extract, and synchronize TAR archives
+- **Compression Support**: Gzip compression (`.tar.gz`, `.tgz`)
+- **GPG Integration**: Encrypt and sign TAR archives for secure backups
+- **Automatic Detection**: Smart detection of TAR files by extension
+- **Flexible Workflows**: Directory ↔ TAR, TAR ↔ TAR synchronization
+
+### Supported TAR Formats
+- `.tar` - Basic TAR archive
+- `.tar.gz` / `.tgz` - Gzip compressed TAR
+- `.tar.gpg` - GPG encrypted TAR
+- `.tar.gz.gpg` / `.tgz.gpg` - Compressed and encrypted TAR
+
 ## Roadmap
 
+- [x] TAR archive support with compression
+- [x] GPG encryption and signing
 - [ ] Network synchronization support (SSH)
 - [ ] Configuration file support
-- [ ] Compression during transfer
 - [ ] Bandwidth limiting
 - [ ] Real-time monitoring API
 - [ ] GUI interface
