@@ -180,6 +180,11 @@ func parseFlags() Config {
 		config.Destination = args[1]
 	}
 
+	// If --checksum flag is used, automatically set method to checksum
+	if config.Checksum && config.Method == "mtime" {
+		config.Method = "checksum"
+	}
+
 	return config
 }
 
