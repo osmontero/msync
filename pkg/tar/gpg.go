@@ -10,7 +10,7 @@ import (
 
 // GPGHandler handles GPG encryption, decryption, signing, and verification
 type GPGHandler struct {
-	KeyID     string
+	KeyID       string
 	KeyringPath string
 }
 
@@ -244,6 +244,18 @@ func (r *gpgReader) Read(p []byte) (n int, err error) {
 	if err == io.EOF {
 		// Wait for process to complete
 		if waitErr := r.cmd.Wait(); waitErr != nil {
+			// Provide more helpful error messages based on common GPG errors
+			exitErr, ok := waitErr.(*exec.ExitError)
+			if ok {
+				switch exitErr.ExitCode() {
+				case 2:
+					return n, fmt.Errorf("GPG decryption failed: file may not be encrypted or wrong key used (exit code 2)")
+				case 9:
+					return n, fmt.Errorf("GPG decryption failed: no secret key available (exit code 9)")
+				default:
+					return n, fmt.Errorf("GPG process failed with exit code %d: %w", exitErr.ExitCode(), waitErr)
+				}
+			}
 			return n, fmt.Errorf("GPG process failed: %w", waitErr)
 		}
 	}

@@ -71,15 +71,7 @@ func (ta *TarArchive) Create(sourceDir string) error {
 
 	var writer io.Writer = file
 
-	// Add gzip compression if enabled
-	var gzipWriter *gzip.Writer
-	if ta.Options.Compression {
-		gzipWriter = gzip.NewWriter(writer)
-		writer = gzipWriter
-		defer gzipWriter.Close()
-	}
-
-	// Add GPG encryption if enabled
+	// Add GPG encryption first (outermost layer)
 	var encryptedWriter io.WriteCloser
 	if ta.Options.GPGEncrypt && ta.gpg != nil {
 		encryptedWriter, err = ta.gpg.Encrypt(writer)
@@ -88,6 +80,14 @@ func (ta *TarArchive) Create(sourceDir string) error {
 		}
 		writer = encryptedWriter
 		defer encryptedWriter.Close()
+	}
+
+	// Add gzip compression (middle layer)
+	var gzipWriter *gzip.Writer
+	if ta.Options.Compression {
+		gzipWriter = gzip.NewWriter(writer)
+		writer = gzipWriter
+		defer gzipWriter.Close()
 	}
 
 	tarWriter := tar.NewWriter(writer)
@@ -191,8 +191,32 @@ func (ta *TarArchive) Extract(destDir string) error {
 
 	var reader io.Reader = file
 
-	// Handle GPG decryption if encrypted
+	// Check if the file is actually encrypted before trying to decrypt
+	actuallyEncrypted := false
 	if ta.Options.GPGEncrypt && ta.gpg != nil {
+		// Read a small header to check if it's encrypted
+		header := make([]byte, 50)
+		n, err := file.Read(header)
+		if err != nil && err != io.EOF {
+			return fmt.Errorf("failed to read file header: %w", err)
+		}
+
+		actuallyEncrypted = ta.gpg.IsEncrypted(header[:n])
+
+		// Reset file position
+		file.Seek(0, 0)
+
+		if ta.Options.Verbose {
+			if actuallyEncrypted {
+				fmt.Printf("File is GPG encrypted, decrypting...\n")
+			} else {
+				fmt.Printf("File is not encrypted despite .gpg extension\n")
+			}
+		}
+	}
+
+	// Handle GPG decryption if actually encrypted
+	if actuallyEncrypted && ta.gpg != nil {
 		decryptedReader, err := ta.gpg.Decrypt(reader)
 		if err != nil {
 			return fmt.Errorf("failed to decrypt archive: %w", err)
@@ -372,7 +396,7 @@ func IsTarFile(path string) bool {
 // ParseTarOptions determines TAR options from file extension
 func ParseTarOptions(path string) TarOptions {
 	path = strings.ToLower(path)
-	
+
 	options := TarOptions{
 		Compression: strings.Contains(path, ".gz") || strings.Contains(path, ".tgz"),
 		GPGEncrypt:  strings.HasSuffix(path, ".gpg"),
